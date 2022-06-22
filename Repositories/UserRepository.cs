@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
-using apiOAuth.Models;
+using api_authentication.Models;
 
-namespace apiOAuth.Repositories
+namespace api_authentication.Repositories
 {
     public static class UserRepository
     {

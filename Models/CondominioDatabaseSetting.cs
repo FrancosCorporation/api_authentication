@@ -1,4 +1,4 @@
-namespace apiOAuth.Models
+namespace api_authentication.Models
 {
     public class CondominioDatabaseSetting : ICondominioDatabaseSetting
     {

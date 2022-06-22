@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Bson;
 
-namespace apiOAuth.Models
+namespace api_authentication.Models
 {
     public class UserCondominio
     {

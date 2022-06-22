@@ -1,13 +1,13 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
-using apiOAuth.Models;
+using api_authentication.Models;
 using System;
 using Microsoft.AspNetCore.Authorization;
 using System.Linq;
-using apiOAuth.Services;
+using api_authentication.Services;
 
-namespace apiOAuth.Controllers
+namespace api_authentication.Controllers
 {
     [Route("api")]
     [ApiController]

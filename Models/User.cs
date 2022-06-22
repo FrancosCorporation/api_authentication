@@ -3,7 +3,7 @@ using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using System.ComponentModel.DataAnnotations;
 
-namespace apiOAuth.Models
+namespace api_authentication.Models
 {
     public class User
     {

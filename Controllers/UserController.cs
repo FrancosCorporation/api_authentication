@@ -1,15 +1,15 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
-using apiOAuth.Models;
+using api_authentication.Models;
 using System;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using System.Linq;
-using apiOAuth.Services;
-using apiOAuth.Repositories;
+using api_authentication.Services;
+using api_authentication.Repositories;
 
-namespace apiOAuth.Controllers
+namespace api_authentication.Controllers
 {
     [Route("v1/account")]
     public class UserController : ControllerBase

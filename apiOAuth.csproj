@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net5.0</TargetFramework>
-    <UserSecretsId>aspnet-apiOAuth-B09E488D-EC3D-46F9-B589-AC0C3C762FE0</UserSecretsId>
+    <UserSecretsId>aspnet-api_authentication-B09E488D-EC3D-46F9-B589-AC0C3C762FE0</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

@@ -2,7 +2,7 @@ using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using apiOAuth.Models;
+using api_authentication.Models;
 using Microsoft.IdentityModel.Tokens;
 using Newtonsoft.Json.Linq;
 using Microsoft.AspNetCore.Http;
@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Http;
 /*
     Gera token utilizando a chave Secret no arquivo Settings
 */
-namespace apiOAuth.Services
+namespace api_authentication.Services
 {
     public static class TokenService
     {

@@ -8,10 +8,10 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.Options;
 using System.Text;
-using apiOAuth.Services;
-using apiOAuth.Models;
+using api_authentication.Services;
+using api_authentication.Models;
 
-namespace apiOAuth
+namespace api_authentication
 {
     public class Startup
     {

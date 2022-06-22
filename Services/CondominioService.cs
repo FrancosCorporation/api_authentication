@@ -1,4 +1,4 @@
-using apiOAuth.Models;
+using api_authentication.Models;
 using MongoDB.Driver;
 using System.Threading.Tasks;
 using System.Collections.Generic;
@@ -7,11 +7,11 @@ using System.Text;
 using MongoDB.Bson;
 using System;
 using Microsoft.AspNetCore.Http;
-using apiOAuth.Services;
+using api_authentication.Services;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json.Linq;
 
-namespace apiOAuth.Services
+namespace api_authentication.Services
 {
     public class CondominioService : ControllerBase
     {

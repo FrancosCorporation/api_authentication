@@ -1,4 +1,4 @@
-namespace apiOAuth
+namespace api_authentication
 {
     public static class Settings
     {
