@@ -1,1 +1,13 @@
 .vscode
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+.vs/
+.idea/
+*.user
+*.suo
+TestResults/
+coverage/
+.env
+*.dmp
