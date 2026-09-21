@@ -1,5 +1,25 @@
 # api_authentication
 
+## 🐳 Instalação e Execução (Docker) — recomendado
+
+### Pré-requisitos
+- [Docker](https://docs.docker.com/get-docker/) + Docker Compose
+
+### Rodar com Docker
+```bash
+docker compose up --build
+```
+```bash
+docker run --rm -v $(pwd):/src -w /src mcr.microsoft.com/dotnet/sdk:8.0 dotnet run
+```
+
+### Sem Docker (local)
+```bash
+# Requer .NET SDK
+dotnet build
+dotnet run
+```
+
 API REST de autenticação e cadastro multi-tenant de condomínios, com um banco MongoDB isolado por condomínio e autenticação por JWT com papéis.
 
 ![C#](https://img.shields.io/badge/C%23-239120?style=flat-square&logo=csharp&logoColor=white)
