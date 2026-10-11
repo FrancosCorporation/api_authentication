@@ -1,82 +1,123 @@
 using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 using api_authentication.Models;
-using Microsoft.IdentityModel.Tokens;
-using Newtonsoft.Json.Linq;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Net.Http.Headers;
+using Microsoft.IdentityModel.Tokens;
 
-/*
-    Gera token utilizando a chave Secret no arquivo Settings
-*/
 namespace api_authentication.Services
 {
+    public sealed class TokenResponse
+    {
+        public string token { get; set; }
+        public DateTime expiresAtUtc { get; set; }
+    }
+
+    public sealed class TokenValidationResult
+    {
+        public ClaimsPrincipal Principal { get; set; }
+        public string TokenId { get; set; }
+        public DateTime ExpiresAtUtc { get; set; }
+    }
+
     public static class TokenService
     {
-        public static string GenerateToken(UserCondominio user)
+        private static readonly JwtSecurityTokenHandler Handler = new JwtSecurityTokenHandler();
+
+        static TokenService() => Handler.MapInboundClaims = false;
+
+        public static TokenResponse GenerateToken(UserCondominio user)
         {
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.ASCII.GetBytes(Settings.Secret);
-            var tokenDescriptor = new SecurityTokenDescriptor
+            var now = DateTime.UtcNow;
+            var expiresAt = now.AddMinutes(15);
+            var descriptor = new SecurityTokenDescriptor
             {
-                Subject = new ClaimsIdentity(new Claim[]
+                Subject = new ClaimsIdentity(new[]
                 {
-                    new Claim("objectId", user.id.ToString()),
-                    new Claim(ClaimTypes.Name, user.username.ToString()),
-                    new Claim("database", user.nameCondominio.ToString()),
-                    new Claim(ClaimTypes.Role, user.role.ToString())
+                    new Claim("objectId", user.id),
+                    new Claim(ClaimTypes.Name, user.username),
+                    new Claim("database", user.nameCondominio),
+                    new Claim(ClaimTypes.Role, user.role),
+                    new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N"))
                 }),
-                Expires = DateTime.UtcNow.AddHours(10),
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
+                Issuer = Settings.JwtIssuer,
+                Audience = Settings.JwtAudience,
+                IssuedAt = now,
+                NotBefore = now,
+                Expires = expiresAt,
+                SigningCredentials = new SigningCredentials(
+                    new SymmetricSecurityKey(Settings.GetJwtSecretBytes()),
+                    SecurityAlgorithms.HmacSha256)
             };
-            var token = tokenHandler.CreateToken(tokenDescriptor);
-            return tokenHandler.WriteToken(token);
+
+            return new TokenResponse
+            {
+                token = Handler.WriteToken(Handler.CreateToken(descriptor)),
+                expiresAtUtc = expiresAt
+            };
         }
 
-        public static dynamic ValidateToken(HttpRequest request)
+        public static TokenValidationResult ValidateToken(HttpRequest request)
         {
-            string jwtString = request.Headers["Authorization"].ToString().Split(" ")[1];
-            var tokenHandler = new JwtSecurityTokenHandler();
-            SecurityToken validatedToken;
-            TokenValidationParameters validationParameters = new TokenValidationParameters()
-            {
-                ValidateLifetime = true, // Because there is no expiration in the generated token
-                ValidateAudience = false, // Because there is no audiance in the generated token
-                ValidateIssuer = false,   // Because there is no issuer in the generated token
-                ValidIssuer = "Sample",
-                ValidAudience = "Sample",
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Settings.Secret)), // The same key as the one that generate the token
-                LifetimeValidator = (DateTime? notBefore, DateTime? expires, SecurityToken securityToken, TokenValidationParameters validationParameters) =>
-                {
-                    if (expires != null)
-                    {
-                        if (DateTime.Now < expires.Value.ToLocalTime()) return true;
-                    }
-                    return false;
-                }
-            };
+            if (!TryGetBearerToken(request, out var token)) return null;
 
             try
             {
-                var p = tokenHandler.ValidateToken(jwtString, validationParameters, out validatedToken);
-                return true;
+                var principal = Handler.ValidateToken(token, CreateValidationParameters(), out var validatedToken);
+                if (!(validatedToken is JwtSecurityToken jwt) ||
+                    !string.Equals(jwt.Header.Alg, SecurityAlgorithms.HmacSha256, StringComparison.Ordinal))
+                    return null;
+
+                var tokenId = principal.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+                if (string.IsNullOrWhiteSpace(tokenId)) return null;
+
+                return new TokenValidationResult
+                {
+                    Principal = principal,
+                    TokenId = tokenId,
+                    ExpiresAtUtc = jwt.ValidTo
+                };
             }
-            catch (SecurityTokenException e)
+            catch (SecurityTokenException)
             {
-                return false;
+                return null;
             }
-            
+            catch (ArgumentException)
+            {
+                return null;
+            }
         }
 
-        public static dynamic UnGenereteToken(HttpRequest request)
+        public static TokenValidationParameters CreateValidationParameters(byte[] signingKey = null)
         {
-            string jwtString = request.Headers["Authorization"].ToString().Split(" ")[1];
-            JwtSecurityTokenHandler handler = new JwtSecurityTokenHandler();
-            JwtSecurityToken jsonToken = handler.ReadJwtToken(jwtString);
-            JObject jsonClaim = JObject.Parse(jsonToken.ToString().Split(".")[1]);
-            return jsonClaim;
+            signingKey = signingKey ?? Settings.GetJwtSecretBytes();
+            return new TokenValidationParameters
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(signingKey),
+                ValidateIssuer = true,
+                ValidIssuer = Settings.JwtIssuer,
+                ValidateAudience = true,
+                ValidAudience = Settings.JwtAudience,
+                ValidateLifetime = true,
+                NameClaimType = "name",
+                RoleClaimType = "role",
+                ClockSkew = TimeSpan.FromSeconds(30)
+            };
         }
 
+        public static bool TryGetBearerToken(HttpRequest request, out string token)
+        {
+            token = null;
+            if (!System.Net.Http.Headers.AuthenticationHeaderValue.TryParse(
+                    request.Headers[HeaderNames.Authorization], out var header) ||
+                !string.Equals(header.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(header.Parameter))
+                return false;
+
+            token = header.Parameter.Trim();
+            return token.Length > 0;
+        }
     }
 }

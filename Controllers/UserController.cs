@@ -1,68 +1,51 @@
-using System.Collections.Generic;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
 using api_authentication.Models;
-using System;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
-using System.Linq;
 using api_authentication.Services;
-using api_authentication.Repositories;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace api_authentication.Controllers
 {
+    [ApiController]
     [Route("v1/account")]
     public class UserController : ControllerBase
     {
-        CondominioService _service;
-        public UserController(CondominioService cond) => _service = cond;
-        /*
-        [HttpPost]
-        [Route("login")]
+        private readonly CondominioService _service;
+
+        public UserController(CondominioService service) => _service = service;
+
+        [HttpPost("login")]
         [AllowAnonymous]
-        public async Task<ActionResult<dynamic>> Authenticate([FromForm]UserCondominio model)
-        {
-            var user =  UserRepository.Get(model.Username, model.Password);
+        [EnableRateLimiting("login")]
+        public Task<IActionResult> Login([FromBody] LoginRequest model) =>
+            _service.loginCondominio(model, HttpContext.Connection.RemoteIpAddress?.ToString(), Response);
 
-            if (user == null)
-                return NotFound(new { message = "Usuário ou senha inválidos" });
-
-            var token = TokenService.GenerateToken(user);
-            user.Password = "";
-            return new
-            {
-                user = user,
-                token = token
-            };
-        }
-        */
-        [HttpGet]
-        [Route("anonymous")]
-        [AllowAnonymous]
-        public string Anonymous() => "Anônimo";
-
-        [HttpGet]
-        [Route("authenticated")]
+        [HttpPost("logout")]
         [Authorize]
-        public string Authenticated() => String.Format("Autenticado - {0}", User.Identity.Name);
+        public async Task<IActionResult> Logout()
+        {
+            var token = TokenService.ValidateToken(Request);
+            if (token == null) return Unauthorized();
 
-        [HttpGet]
-        [Route("employee")]
-        [Authorize(Roles = "employee,manager")]
-        public string Employee() => "Funcionário";
-
-        [HttpGet]
-        [Route("manager")]
-        [Authorize(Roles = "manager")]
-        [AutoValidateAntiforgeryToken]
-        public dynamic Manager() {
-            bool isValid = _service.tokenAuthorization(Request);
-            if(isValid) {
-                return Ok();
-            } else {
-                return Unauthorized();
-            }
+            await _service.RevokeToken(token.TokenId, token.ExpiresAtUtc);
+            return NoContent();
         }
 
+        [HttpGet("anonymous")]
+        [AllowAnonymous]
+        public ActionResult<string> Anonymous() => "Anônimo";
+
+        [HttpGet("authenticated")]
+        [Authorize]
+        public ActionResult<string> Authenticated() => $"Autenticado - {User.Identity?.Name}";
+
+        [HttpGet("employee")]
+        [Authorize(Roles = "employee,manager,Administrator")]
+        public ActionResult<string> Employee() => "Funcionário";
+
+        [HttpGet("manager")]
+        [Authorize(Roles = "manager,Administrator")]
+        public IActionResult Manager() => Ok();
     }
 }

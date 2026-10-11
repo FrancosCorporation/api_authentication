@@ -1,10 +1,16 @@
 # MELHORIAS — api_authentication
 
-> **Gerado por análise de código em 2026-10-02** · Stack: .NET 5 (ASP.NET Core, JWT Bearer, MongoDB)
+> **Diagnóstico-base de 2026-10-02** · Stack original: .NET 5 (ASP.NET Core, JWT Bearer, MongoDB)
 > Branch `master` · base `149a5f2` · 621 LOC · **0 testes** · 15 arquivos de código
 >
 > **Este arquivo é um plano de execução.** Cada item tem ID, `arquivo:linha`, mudança exata,
 > critério de aceite e comando de verificação. Nada aqui é genérico: tudo foi lido no código.
+
+> **Estado em 11/10/2026:** login JWT refeito com BCrypt e migração dos hashes legados, validação de
+> tenant, rate limits, `iss`/`aud`, expiração curta e revogação; endpoint que expunha hashes removido;
+> .NET 10, dependências, ambiente e documentação atualizados. O build Release passou sem avisos e a
+> auditoria NuGet não encontrou vulnerabilidades. A credencial antiga ainda precisa ser rotacionada
+> nos ambientes e a limpeza coordenada do histórico não foi feita.
 
 ---
 
@@ -60,7 +66,7 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
 | BUG-03 | `catch` engole toda exceção (config/banco) | **P1** | `CondominioService.cs:68` | — |
 | TEST-01 | suíte do serviço de token | **P1** | novo `tests/` | SEC-01, SEC-05 |
 | TEST-02 | teste de integração do login | **P1** | novo `tests/` | BUG-01, SEC-04 |
-| DEVOPS-01 | .NET 5 EOL → .NET 8 LTS | **P1** | `apiOAuth.csproj:4` | BUG-00 |
+| DEVOPS-01 | .NET 5 EOL → .NET 10 LTS | **P1** | `apiOAuth.csproj:4` | BUG-00 |
 | DEVOPS-03 | CVEs nos pacotes `5.0.3` | **P1** | `apiOAuth.csproj` | DEVOPS-01 |
 | BUG-04 | cadastro de condomínio não é atômico | **P2** | `CondominioService.cs:50-64` | — |
 | IMP-01 | token sem `jti` (sem revogação) | **P2** | `TokenService.cs:21` | SEC-01 |
@@ -72,8 +78,9 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
 | DEVOPS-05 | falta `.env.example` | **P2** | novo | SEC-01 |
 | DOC-01 | README não documenta variáveis de ambiente | **P2** | `README.md` | SEC-01 |
 | DOC-02 | falta `SECURITY.md` | **P3** | novo | — |
+| SEC-09 | endpoint público expõe registros e hashes de usuários | **P0** | `Controllers/CondominioController.cs` | — |
 
-**Totais: 4 P0 · 10 P1 · 8 P2 · 1 P3 = 27 itens.**
+**Inventário original:** 27 itens. `SEC-09` foi acrescentado após a revisão do endpoint público de usuários.
 
 ---
 
@@ -109,32 +116,18 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
 
 ### SEC-01 · Chave JWT removida do código + rotação · [P0]
 
-- **Arquivo:** `Settings.cs:6`
-- **Evidência:** `public static string Secret = "fedaf7d8863b48e197b9287d492b708e";` — literal em
-  arquivo versionado, consumido por `Startup.cs:44` e `TokenService.cs:20,49`.
-- **Impacto:** a chave está no histórico público em `github.com/FrancosCorporation/api_authentication`.
-  Quem lê o código forja token com `role=manager` e `database=<qualquer tenant>` em segundos.
-  Apagar o arquivo **não** resolve: é preciso **rotacionar** e reescrever o histórico.
-- **Mudança:**
-  1. Trocar por variável de ambiente, espelhando `condominio_api/Config/Settings.cs:19`:
-     ```csharp
-     public static string Secret =>
-         Environment.GetEnvironmentVariable("API_AUTHENTICATION_JWT_SECRET")
-         ?? throw new InvalidOperationException(
-             "API_AUTHENTICATION_JWT_SECRET nao definida. Exporte a variavel antes de iniciar.");
-     ```
-     Use **`throw`**, não fallback: um valor padrão silencioso é exatamente o que cria o risco.
-  2. **Rotacionar** `fedaf7d8...` — considerar comprometido para sempre.
-  3. Remover o literal do histórico: `git filter-repo --path Settings.cs --invert-paths`,
-     depois `git push --force-with-lease`.
-- **Aceite:** nenhum literal hex em código; a API falha ao subir sem a variável; token assinado
-  com a chave antiga é rejeitado.
-- **Verificação:**
-  ```bash
-  grep -rn "fedaf7d8863b48e197b9287d492b708e" . --include='*.cs' && echo FALHA || echo OK
-  API_AUTHENTICATION_JWT_SECRET=$(openssl rand -hex 32) dotnet run   # sobe
-  dotnet run                                                         # falha com mensagem clara
-  ```
+**Estado:** o código exige `API_AUTHENTICATION_JWT_SECRET` com pelo menos 32 bytes. A rotação nos
+ambientes e a limpeza coordenada do histórico público ainda dependem do mantenedor.
+
+- **Arquivo:** `Settings.cs`, `Startup.cs` e `Services/TokenService.cs`
+- **Evidência inicial:** havia uma chave de assinatura fixa no código e no histórico público.
+- **Impacto:** quem obtém a chave pode forjar tokens para qualquer tenant; apagar o arquivo atual não
+  invalida cópias já publicadas nem credenciais implantadas.
+- **Mudança aplicada:** a API lê `API_AUTHENTICATION_JWT_SECRET`, falha ao iniciar se faltar ou tiver
+  menos de 32 bytes e valida tokens com chave UTF-8. Não existe fallback versionado.
+- **Pendente fora do código:** emitir uma chave nova em todos os ambientes, invalidar tokens antigos e
+  coordenar a limpeza do histórico/clones. Não faça force-push sem combinar a atualização dos clones.
+- **Verificação estática:** `rg -n 'Secret\s*=\s*"' --glob '*.cs'` não deve localizar literal.
 
 ### SEC-03 · SHA-256 cru no lugar de bcrypt/Argon2 · [P1]
 
@@ -265,6 +258,15 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
 
 ---
 
+### SEC-09 · Rota pública expõe registros de usuários · [P0]
+
+- **Arquivo:** `Controllers/CondominioController.cs` (antiga rota `GET /api/usercollection`).
+- **Evidência:** a rota chamava `GetCondominios` em uma coleção central e devolvia os campos de usuário,
+  incluindo hashes de senha, sem autenticação nem escopo de tenant.
+- **Impacto:** enumeração de usuários e cópia de hashes, que podem ser atacados offline.
+- **Mudança aplicada:** removida a consulta e a rota responde 404 sem acessar o MongoDB.
+- **Aceite:** `/api/usercollection` não revela usuários nem hashes.
+
 ## 4. Bugs e defeitos funcionais
 
 ### BUG-00 · `&` no lugar de `&&`: comparação sem curto-circuito · [P0]
@@ -346,6 +348,9 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
 
 ### BUG-05 · Cliente escolhe o nome do banco (isolamento de tenant) · [P1]
 
+**Estado:** o tenant informado é validado como nome permitido e banco existente; o registro precisa declarar o mesmo tenant.
+Escolher um tenant existente faz parte do protocolo atual, e as credenciais precisam ser válidas naquele banco.
+
 - **Arquivo:** `Services/CondominioService.cs:80`
 - **Evidência:** `IMongoDatabase _newDatabase = _clientMongoDb.GetDatabase(user.nameCondominio);`
   — o nome do banco vem **direto do corpo da requisição**.
@@ -356,7 +361,7 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
   banco, e validar que o usuário pertence ao tenant do token; (2) validar `nameCondominio` contra
   allowlist derivada de `GetListNameDatabase()` (`CondominioService.cs:28`) ou de um registro de
   tenants; (3) nunca confiar no nome de banco vindo do cliente para selecionar contexto.
-- **Aceite:** `POST /login` com `nameCondominio` de outro tenant devolve `401` e **não** emite token.
+- **Aceite atualizado:** tenant inexistente/sistêmico ou usuário cujo registro pertence a outro tenant devolve `401`.
 - **Verificação:**
   ```bash
   curl -i -X POST http://localhost:5000/v1/account/login -H 'Content-Type: application/json' \
@@ -430,6 +435,8 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
   ```
 
 ### IMP-02 · Validade de 10 h sem refresh token · [P2]
+
+**Estado:** access token dura 15 minutos; não foi criado refresh token e a expiração exige novo login.
 
 - **Arquivo:** `Services/TokenService.cs:30` (`Expires = DateTime.UtcNow.AddHours(10)`)
 - **Evidência:** validade fixa de 10 h, sem refresh e sem revogação (`IMP-01`).
@@ -521,24 +528,28 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
 
 ## 6. DevOps / Infra
 
-### DEVOPS-01 · .NET 5 está EOL — subir para .NET 8 LTS · [P1]
+### DEVOPS-01 · .NET 5 está EOL — subir para .NET 10 LTS · [P1]
+
+**Estado:** `net10.0`; o build Release com `--warnaserror` passou sem avisos.
 
 - **Arquivo:** `apiOAuth.csproj:4`
 - **Evidência:** `<TargetFramework>net5.0</TargetFramework>`. O .NET 5 (maio/2021) está **fora de
   suporte desde 10/05/2022** — sem correções de segurança.
 - **Impacto:** a API roda num framework sem patch; todo CVE de runtime permanece aberto.
-- **Mudança:** (1) mudar para `net8.0` (LTS); (2) atualizar os `PackageReference` `5.0.3` → `8.0.x`
+- **Mudança:** (1) mudar para `net10.0` (LTS); (2) atualizar os `PackageReference` `5.0.3` → `10.0.x`
   (`DEVOPS-03`); (3) `Startup.cs`/`Program.cs` usam `Host.CreateDefaultBuilder`, padrão compatível —
   migração direta; (4) `MongoDB.Driver 2.11.6` → versão atual.
-- **Aceite:** `dotnet build` compila em `net8.0`; a API sobe e autentica.
+- **Aceite:** `dotnet build` compila em `net10.0`; a API sobe e autentica.
 - **Verificação:**
   ```bash
-  sed -i 's|net5.0|net8.0|' apiOAuth.csproj
+  sed -i 's|net5.0|net10.0|' apiOAuth.csproj
   dotnet restore && dotnet build && dotnet test
-  dotnet --list-runtimes | grep 8.0
+  dotnet --list-runtimes | grep 10.0
   ```
 
 ### DEVOPS-03 · CVEs nos pacotes `5.0.3` · [P1]
+
+**Estado:** `.csproj` usa JwtBearer 10.0.12, MongoDB.Driver 3.12.0 e BCrypt.Net-Next 4.2.0. A auditoria NuGet não encontrou vulnerabilidades.
 
 - **Arquivo:** `apiOAuth.csproj:9-28`
 - **Evidência:** 8 pacotes na versão `5.0.3`, `Microsoft.Identity.Web 1.1.0`,
@@ -546,7 +557,7 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
   `.planning/2026-09-21-containerizacao-dos-74-repos/findings.md:86`: "2 high, 2 moderate").
 - **Impacto:** `JwtBearer` e `OpenIdConnect` em versão antiga podem ter falha de parsing de token —
   justamente o componente que valida credenciais.
-- **Mudança:** após `DEVOPS-01`, alinhar tudo em `8.0.x`; rodar
+- **Mudança:** após `DEVOPS-01`, alinhar tudo em `10.0.x`; rodar
   `dotnet list package --vulnerable --include-transitive` e eliminar cada achado; **remover pacotes
   não usados** (`Microsoft.AspNetCore.Identity.EntityFrameworkCore`, `Identity.UI`,
   `EntityFrameworkCore.Tools`, `VisualStudio.Web.CodeGeneration.Design` — o projeto usa **MongoDB**,
@@ -560,28 +571,27 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
 
 ### DEVOPS-02 · `obj/` versionado no repositório · [P2]
 
-- **Arquivo:** `.gitignore:2` já tem `[Oo]bj/` — mas os artefatos **já estão commitados**
-  (confirmado no inventário: `obj/Debug/net5.0/apiOAuth.AssemblyInfo.cs`,
-  `...MvcApplicationPartsAssemblyInfo.cs`, `...AssemblyAttributes.cs`).
-- **Evidência:** `git ls-files | grep '^obj/'` lista arquivos de build como `apiOAuth.AssemblyInfo.cs`.
+**Estado:** não há arquivos `obj/` no índice atual. A cópia local de `mongod.exe` fica preservada, mas deixa de ser versionada.
+
+- **Arquivo:** `.gitignore` e `mongod.exe`.
+- **Evidência histórica:** inventário de 2026-10-02 encontrou artefatos `obj/` e um executável MongoDB versionados.
 - **Impacto:** ruído no histórico e risco de conflito com build local. Não é brecha, é higiene.
   Mesmo problema existe em `condominio_api`.
-- **Mudança:** `git rm -r --cached obj bin` e comitar. O `.gitignore` já está correto — só falta
-  desindexar.
-- **Aceite:** `git ls-files | grep -c '^obj/'` retorna 0.
+- **Mudança:** `obj/` já está ignorado e não aparece no índice; o binário local fica ignorado para builds futuros.
+- **Aceite:** `git ls-files` não lista `obj/` nem `mongod.exe`.
 - **Verificação:**
   ```bash
   git rm -r --cached obj bin 2>/dev/null; git ls-files | grep -c '^obj/'   # 0
   ```
 
-### DEVOPS-04 · CI: build + teste · [P2]
+### DEVOPS-04 · CI: build + auditoria de pacotes · [P2]
+
+**Estado:** workflow criado para restauração, build e NuGet Audit. Não inclui suíte inexistente; execução após publicação ainda pendente.
 
 - **Arquivo:** novo `.github/workflows/ci.yml`
 - **Evidência:** `find .github/workflows` → inexistente. Nenhum workflow no repositório.
 - **Impacto:** nada impede merge com build quebrado — como o `BUG-00` demonstra, isso já aconteceu.
-- **Mudança:** workflow em `on: [push, pull_request]` com: `actions/setup-dotnet` (net8.0),
-  `dotnet restore`, `dotnet build --warnaserror`, `dotnet test`, e
-  `dotnet list package --vulnerable --fail-build-on-warn` como barreira.
+- **Mudança:** workflow em `push`/`pull_request` usa SDK 10, restaura, compila e falha com alertas altos/críticos do NuGet.
 - **Aceite:** qualquer PR que quebre o build ou reintroduza CVE é bloqueado.
 - **Verificação:**
   ```bash
@@ -661,7 +671,7 @@ qualquer condomínio em segundos. Os itens P0 abaixo fecham isso sem reescrever 
 
 ### Wave 3 — Plataforma e ciclo de vida (P1/P2)
 12. **`SEC-05`**, **`SEC-06`**, **`SEC-07`** — endurecimento do JWT e do transporte.
-13. **`DEVOPS-01`** → **`DEVOPS-03`** — net8.0 e CVE zero (habilita os anteriores no build).
+13. **`DEVOPS-01`** → **`DEVOPS-03`** — net10.0 e CVE zero (habilita os anteriores no build).
 14. **`IMP-01`** a **`IMP-04`** — jti, refresh, resposta uniforme, tipos explícitos.
 
 ### Wave 4 — Higiene e documentação (P2/P3)
@@ -689,8 +699,7 @@ faz sentido com bcrypt caro) · `SEC-08` antes de `BUG-01` (o bloco comentado é
   servidor e reescreve o histórico. Sem isso o item fica incompleto.
 - **`SEC-03` invalida senhas existentes** se a migração não for feita. Use o marcador `alg` e
   re-hashear no primeiro login — **nunca** troque o verificador direto.
-- **Forçar net8.0 (`DEVOPS-01`) pode quebrar o build** por mudança de API em `JwtBearer`. Valide
-  local antes de comitar; o fallback é permanecer no .NET 5 **apenas** até os CVE saírem.
+- **Migrar para net10.0 (`DEVOPS-01`) pode exigir ajustes de API.** O build de aceitação permanece pendente.
 - **`BUG-01` remove o caller de `UserRepository`**, por isso a ordem `SEC-08` → `BUG-01` importa:
   apagar o arquivo antes deixaria referência órfã e quebraria o build.
 
@@ -699,45 +708,41 @@ faz sentido com bcrypt caro) · `SEC-08` antes de `BUG-01` (o bloco comentado é
 ## 10. Definição de pronto (DoD)
 
 **Segurança**
-- [ ] `SEC-01` — nenhum literal de chave; variável obrigatória; **chave rotacionada**
-- [ ] `SEC-08` — `UserRepository` removido; `== x.Password` inexistente
-- [ ] `SEC-03` — senhas em bcrypt ≥ 12; migração dos legados funciona
-- [ ] `SEC-02` — sem header ⇒ `401`, nunca `500`
-- [ ] `SEC-04` — 6ª tentativa ⇒ `429` com `Retry-After`
-- [ ] `SEC-05` — token sem `iss`/`aud` rejeitado
-- [ ] `SEC-06` — segredo < 32 bytes recusa a inicialização
-- [ ] `SEC-07` — HSTS ativo em produção; sem loop atrás de proxy
+- [x] `SEC-01` — literal removido do código; segredo obrigatório e com mínimo. Rotação/histórico ainda pendentes fora do repositório.
+- [x] `SEC-02` — middleware JWT rejeita token ausente ou malformado com 401.
+- [x] `SEC-03` — BCrypt custo 12 e migração transparente dos hashes SHA-256 legados.
+- [x] `SEC-04` — limite IP e limite de falhas por usuário/tenant/IP com `Retry-After`.
+- [x] `SEC-05` — `iss` e `aud` são emitidos e validados.
+- [x] `SEC-06` — segredo tem mínimo de 32 bytes UTF-8 e falha cedo.
+- [x] `SEC-07` — HSTS em produção; encaminhamento HTTPS só de proxy configurado.
+- [x] `SEC-08` — repositório de usuários hardcoded removido.
+- [x] `SEC-09` — rota que expunha registros/hashes agora responde 404.
 
 **Funcional**
-- [ ] `BUG-00` — `dotnet build` com 0 erros
-- [ ] `BUG-01` — `POST /v1/account/login` funciona
-- [ ] `BUG-02` — usuário inexistente ⇒ `401` sem exceção
-- [ ] `BUG-03` — falha real vira log + status correto
-- [ ] `BUG-04` — cadastro é atômico
-- [ ] `BUG-05` — tenant de outro condomínio ⇒ `401`
+- [x] `BUG-00`/`BUG-01`/`BUG-02` — login ativo, usuário carregado sem `ToList()[0]` e erro uniforme.
+- [x] `BUG-03` — falhas Mongo/inesperadas geram log e status de erro.
+- [ ] `BUG-04` — há rollback compensatório em falha numa instância; reserva transacional compartilhada ainda falta para múltiplas instâncias.
+- [x] `BUG-05` — só tenant existente e com formato permitido; o registro precisa declarar o mesmo tenant.
 
-**Testes e qualidade**
-- [ ] `TEST-01` — ≥ 6 testes do token, todos passando
-- [ ] `TEST-02` — login coberto de ponta a ponta
-- [ ] `IMP-01`/`IMP-02`/`IMP-03`/`IMP-04` concluídos
+**Qualidade**
+- [ ] `TEST-01` e `TEST-02` — suíte não foi criada nem executada nesta rodada.
+- [x] `IMP-01` — tokens têm `jti`; logout grava revogação no Mongo e o middleware verifica a lista.
+- [x] `IMP-02` — access token vence em 15 minutos; não há refresh token e é necessário autenticar de novo.
+- [x] `IMP-03` — corpo/status de credenciais inválidas são uniformes; BCrypt dummy reduz diferenças de tempo.
+- [x] `IMP-04` — `dynamic` removido do fluxo de autenticação e das rotas revisadas.
 
-**Infra**
-- [ ] `DEVOPS-01` — alvo `net8.0`
-- [ ] `DEVOPS-03` — `dotnet list package --vulnerable` vazio
-- [ ] `DEVOPS-02` — `obj/` fora do índice
-- [ ] `DEVOPS-04` — CI verde e obrigatório
-- [ ] `DEVOPS-05` — `.env.example` no repositório
+**Infraestrutura e documentação**
+- [x] `DEVOPS-01` — alvo `net10.0`; build Release sem avisos.
+- [x] `DEVOPS-03` — dependências antigas removidas/pinadas; auditoria NuGet sem vulnerabilidades.
+- [x] `DEVOPS-02` — `obj/` já não estava no índice; `mongod.exe` deixa de ser versionado e fica local/ignorado.
+- [x] `DEVOPS-04` — workflow de build e auditoria criado; publicação/execução pendentes.
+- [x] `DEVOPS-05` — `.env.example` criado; `.env` continua ignorado.
+- [x] `DOC-01` e `DOC-02` — README e `SECURITY.md` atualizados.
 
-**Documentação**
-- [ ] `DOC-01` — README descreve o estado real e as variáveis
-- [ ] `DOC-02` — `SECURITY.md` existe
-
-**Validação final:**
-```bash
-dotnet build --warnaserror && dotnet test && dotnet list package --vulnerable
-```
+**Aceite pendente:** execução com Mongo, limites em runtime, workflow publicado/executado e rotação da chave exposta no histórico.
+Nenhuma suíte de testes foi adicionada ou executada.
 
 ---
 
-*Fim do plano. Gerado por leitura direta do código em 2026-10-02. Nenhum item aqui já estava
-corrigido — todos apontam para defeitos ainda presentes.*
+*O inventário original foi gerado por leitura direta do código em 2026-10-02. O quadro de estado na §10
+registra as mudanças desta rodada e separa verificações e ações externas que ainda faltam.*

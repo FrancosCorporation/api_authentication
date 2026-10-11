@@ -9,5 +9,7 @@
 *.suo
 TestResults/
 coverage/
-.env
+.env*
+!.env.example
 *.dmp
+mongod.exe
